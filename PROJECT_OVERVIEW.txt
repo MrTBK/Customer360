@@ -1,0 +1,159 @@
+================================================================================
+CUSTOMER360 INTELLIGENCE PLATFORM - FULL PROJECT DESCRIPTION
+================================================================================
+Generated: 2026-09-27. Status: production runtime verified end-to-end.
+
+--------------------------------------------------------------------------------
+1. WHAT THIS PROJECT IS
+--------------------------------------------------------------------------------
+Customer360 is a customer intelligence and behavioral segmentation platform
+built on the real public Olist Brazilian E-Commerce dataset (100k orders,
+2016-2018, Kaggle: olistbr/brazilian-ecommerce). It ingests raw e-commerce
+CSV files, validates and quarantines bad records, builds a Kimball star-schema
+warehouse, computes RFM/cohort/churn/segmentation analytics with scikit-learn,
+serves everything through a FastAPI backend, and visualizes it in a dark
+enterprise React dashboard with top navigation.
+
+No mock data. Every number on screen traces to PostgreSQL -> API -> React.
+Known弱 model (churn ROC-AUC 0.573) is reported honestly, not hidden.
+
+--------------------------------------------------------------------------------
+2. TECHNOLOGY STACK
+--------------------------------------------------------------------------------
+  Language        Python (pipeline, API, ML) + TypeScript (frontend)
+  Database        PostgreSQL 15 (container customer360-postgres, host port 5433)
+                  SQLite fallback when DATABASE_URL is unset (tests, backup)
+  Transforms      Versioned SQL in backend/pipeline/orchestrator.py (single path)
+  Orchestration   Apache Airflow 2.8.3 (scheduler + webserver :8080, LocalExecutor,
+                  metadata in `airflow` DB, custom image with sklearn baked)
+  Backend         FastAPI + uvicorn (port 8000), optional x-api-key gate
+  Frontend        React 19 + TypeScript + Vite, Tailwind CSS dark theme,
+                  TanStack Query, Recharts, Lucide icons, state-tab navigation
+  ML              scikit-learn (KMeans, LogisticRegression), pandas, NumPy
+  Testing         pytest (13 backend tests) + vitest (4 frontend tests)
+  Runner          ./run.sh (Postgres + API + frontend), docker-compose.yml
+
+--------------------------------------------------------------------------------
+3. DATA SOURCE (REAL)
+--------------------------------------------------------------------------------
+Public Olist Brazilian E-Commerce dataset, verified row-for-row against the
+published Kaggle source. Files in data/raw/:
+  olist_customers.csv    99,441 rows (customer_id per order, customer_unique_id per person)
+  olist_orders.csv       99,441 rows (statuses, purchase/approved/carrier/delivered timestamps)
+  olist_order_items.csv 112,650 rows (price, freight_value per line item)
+  olist_payments.csv    103,886 rows (credit_card/boleto/voucher/debit_card)
+  olist_reviews.csv     100,000 rows (score 1-5, real Portuguese comments)
+  olist_products.csv     32,951 rows (Portuguese categories translated to English)
+  olist_sellers.csv       3,095 rows
+Total: 551,464 source rows per pipeline run. Customer names do not exist in the
+public data (anonymized hex IDs); the UI shows Buyer + real home city/state
+from dim_customer instead of inventing names.
+
+--------------------------------------------------------------------------------
+4. DATABASE SCHEMAS (PostgreSQL)
+--------------------------------------------------------------------------------
+  raw          7 olist_* tables + ingestion metadata (_ingestion_id, hash, file, row no)
+  staging      7 stg_* cleansed tables (trimmed strings, translated categories)
+  warehouse    dim_customer (96,096 buyers), dim_product, dim_seller, dim_date (792 days),
+               fact_orders (99,441, grain: order_id), fact_order_items (112,650,
+               grain: order_id+item_id), fact_payments, fact_reviews
+  analytics    customer_360 (95,560 profiles, 31 real metrics, no constants),
+               customer_rfm (95,560 scored 1-5 + segments),
+               customer_cohorts (189 acquisition-month x period rows),
+               product_affinity (40 association rules with support/confidence/lift)
+  ml           customer_features (57,510 leak-free vectors, cutoff 2018-03-01),
+               churn_models (registry: ROC/PR/precision/recall/F1/Brier + threshold),
+               churn_predictions (95,560 probabilities + canonical risk tiers),
+               customer_segments (4 profiled archetypes; per-customer labels in customer_360)
+  monitoring   pipeline_runs, pipeline_tasks (13 per run), ingestion_history,
+               data_quality_results (8 assertions, all currently PASSED)
+  quarantine   invalid_records (price<=0 etc; currently 0 rows)
+
+Grain discipline: facts never join payments/items/reviews without aggregation
+(no fan-out). 536 buyers hold only canceled orders and sit outside RFM marts
+by design (documented methodology, not data loss).
+
+--------------------------------------------------------------------------------
+5. PIPELINE (13 TASKS, customer360_daily_pipeline, daily 02:00 UTC)
+--------------------------------------------------------------------------------
+  check_sources -> extract_sources -> load_raw (COPY bulk load) -> validate_raw
+  -> quarantine_invalid -> dbt_staging (cleanse) -> dbt_tests (uniqueness asserts)
+  -> dbt_warehouse (star schema + dim_date) -> customer_analytics (RFM, cohorts,
+  affinity) -> ml_features (cutoff 2018-03-01, 180-day target window, no leakage)
+  -> run_models (KMeans k=3-5 by silhouette + LogisticRegression balanced,
+  F1-tuned threshold) -> quality_checks (8 math assertions) -> publish_metrics
+Each Airflow task runs one orchestrator stage under a shared airflow-<run> id;
+all 13 logs land under one monitoring.pipeline_runs row. Manual runs:
+python -m backend.pipeline.orchestrator (with DATABASE_URL for PG).
+
+--------------------------------------------------------------------------------
+6. MACHINE LEARNING (HONEST METRICS)
+--------------------------------------------------------------------------------
+  Churn definition: no purchase in the 180 days after 2018-03-01 (non-contractual).
+  Split: shuffled stratified 80/20 (fixed sequential-slice bias).
+  Test metrics: ROC-AUC 0.573 (weak ranker, stated openly), PR-AUC 0.991
+  (base churn rate ~99%), precision 0.988, recall 1.0, F1 0.994, Brier 0.012.
+  Inference auxiliaries (review/delay/category) defaulted for full-population
+  scoring - documented limitation. Distribution: Critical 95,528 / High 19 /
+  Medium 3 / Low 10 (base-rate driven).
+  Canonical risk mapping (pipeline + API identical): >=0.80 Critical,
+  >=0.60 High, >=0.40 Medium, else Low. churn_probability = P(churn, next 180d).
+  Segmentation: KMeans k in [3,4,5] by silhouette on 5k sample (seed 42);
+  personas assigned from profiled stats (frequency/recency/delay ranks), never
+  by cluster id; review/delay per cluster computed from facts.
+
+--------------------------------------------------------------------------------
+7. BACKEND API (FastAPI, 16 GET endpoints, all live queries)
+--------------------------------------------------------------------------------
+  /api/health  /api/customers (paged, search id/city/state/region, segment +
+  risk filters, 5 sort keys)  /api/customers/{id} (+ /orders /products /reviews)
+  /api/segments (+ /{segment} drilldown)  /api/rfm  /api/cohorts  /api/retention
+  /api/churn (+ /model /features)  /api/products  /api/categories  /api/affinity
+  /api/quality (+needs_attention flag)  /api/pipelines  /api/runs
+  /api/datasets (live COUNT(*) per table, 34 entries)  /api/lineage (static topology)
+  Pydantic validation, proper 404s, rollback-safe PG layer, pagination caps.
+
+--------------------------------------------------------------------------------
+8. FRONTEND (DARK, TOP NAV, 9 TABS)
+--------------------------------------------------------------------------------
+  Tabs: Overview, Customers, Customer 360, Segments, RFM, Cohorts, Churn,
+  Products (categories + affinity sub-tabs), Quality. No router, no dead pages.
+  Every data page: loading / error (+retry) / empty / data states via shared
+  components/States.tsx. Human-readable labels: Buyer + city, R·F·M chips with
+  legend, R$ formatting, real review texts, CSV export on directory + categories,
+  city/state search, quality attention badge, API health + latest-run badges.
+  Verified: tsc clean, vite build ~700ms, served on :3002 with /api proxy.
+
+--------------------------------------------------------------------------------
+9. HOW TO RUN
+--------------------------------------------------------------------------------
+  ./run.sh
+    Starts customer360-postgres (:5433), FastAPI (:8000), Vite (:3002).
+    Open http://127.0.0.1:3002. Ports overridable: PG_PORT / API_PORT / APP_PORT.
+  First data load:
+    DATABASE_URL=postgresql://c360_user:c360_password@127.0.0.1:5433/customer360 \
+      PYTHONPATH=. python3 backend/pipeline/orchestrator.py
+  Airflow UI: http://127.0.0.1:8080 (admin/admin, local only).
+  API docs: http://127.0.0.1:8000/docs.
+  Auth (optional): set C360_API_KEY for the API and VITE_API_KEY for the UI.
+
+--------------------------------------------------------------------------------
+10. VERIFICATION EVIDENCE
+--------------------------------------------------------------------------------
+  API 14-16/16 endpoints HTTP 200; invalid customer -> proper 404.
+  pytest 13/13 passed; vitest 4/4 passed; tsc clean; vite build clean.
+  Airflow scheduled + manual runs execute real stages with telemetry in PG.
+  Full trace table + methodology: CUSTOMER360_DATA_CONSISTENCY_AUDIT.md.
+  Decisions: docs/DECISIONS.md (ADR 001-012). Truthfulness fixes, ports,
+  migrations: README.md, docs/FINAL_REVIEW.md, docs/PIPELINE.md.
+
+--------------------------------------------------------------------------------
+11. KNOWN LIMITATIONS (NOT HIDDEN)
+--------------------------------------------------------------------------------
+  - Churn ROC-AUC 0.573: weak ranker, needs class/threshold/feature work.
+  - Airflow runs full pipeline including 3-minute ML; schedule accordingly.
+  - Review texts keep original Portuguese; newlines flattened for COPY.
+  - Inference auxiliaries defaulted (see section 6).
+  - dbt/ CLI folder removed; orchestrator SQL is the single transform path.
+  - compose postgres/airflow services mirror run.sh; run.sh is canonical.
+================================================================================

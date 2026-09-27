@@ -1,0 +1,13 @@
+version: 2
+
+sources:
+  - name: raw
+    schema: raw
+    tables:
+      - name: olist_customers
+      - name: olist_orders
+      - name: olist_order_items
+      - name: olist_payments
+      - name: olist_reviews
+      - name: olist_products
+      - name: olist_sellers

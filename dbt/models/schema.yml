@@ -1,0 +1,38 @@
+version: 2
+
+models:
+  - name: stg_customers
+    columns:
+      - name: customer_id
+        tests: [not_null]
+      - name: customer_unique_id
+        tests: [not_null]
+  - name: stg_orders
+    columns:
+      - name: order_id
+        tests: [not_null, unique]
+      - name: order_status
+        tests:
+          - accepted_values:
+              values: ['delivered', 'shipped', 'canceled', 'invoiced', 'processing', 'unavailable', 'created', 'approved']
+  - name: stg_order_items
+    columns:
+      - name: order_id
+        tests: [not_null]
+      - name: order_item_id
+        tests: [not_null]
+  - name: dim_customer
+    columns:
+      - name: customer_unique_id
+        tests: [not_null, unique]
+  - name: fact_orders
+    columns:
+      - name: order_id
+        tests: [not_null, unique]
+  - name: fact_order_items
+    columns:
+      - name: order_id
+        tests:
+          - relationships:
+              to: ref('fact_orders')
+              field: order_id

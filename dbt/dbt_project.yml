@@ -1,0 +1,25 @@
+name: 'customer360'
+version: '1.0.0'
+config-version: 2
+profile: 'customer360_profile'
+
+model-paths: ["models"]
+test-paths: ["tests"]
+seed-paths: ["seeds"]
+macro-paths: ["macros"]
+target-path: "target"
+clean-targets:
+  - "target"
+  - "dbt_packages"
+
+models:
+  customer360:
+    staging:
+      +schema: staging
+      +materialized: table
+    warehouse:
+      +schema: warehouse
+      +materialized: table
+    analytics:
+      +schema: analytics
+      +materialized: table

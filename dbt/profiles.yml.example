@@ -1,0 +1,13 @@
+# Copy to profiles.yml and set real credentials via PGHOST/PGPORT/PGUSER/PGPASSWORD/PGDATABASE.
+customer360_profile:
+  target: local
+  outputs:
+    local:
+      type: postgres
+      host: "{{ env_var('PGHOST', '127.0.0.1') }}"
+      port: "{{ env_var('PGPORT', '5433') | as_number }}"
+      user: "{{ env_var('PGUSER', 'c360_user') }}"
+      pass: "{{ env_var('PGPASSWORD', 'changeme') }}"
+      dbname: "{{ env_var('PGDATABASE', 'customer360') }}"
+      schema: public
+      threads: 4

@@ -1,0 +1,17 @@
+node_modules/
+build/
+dist/
+coverage/
+.DS_Store
+*.log
+.env*
+!.env.example
+
+# runtime data (re-downloaded via backend/ingestion/download_olist.py)
+data/
+# python + dbt artifacts
+__pycache__/
+.pytest_cache/
+dbt/target/
+dbt/logs/
+.venv/

@@ -1,0 +1,87 @@
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: customer360-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-c360_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-c360_password}
+      POSTGRES_DB: ${POSTGRES_DB:-customer360}
+    ports:
+      - "${PG_PORT:-5433}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-c360_user} -d ${POSTGRES_DB:-customer360}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: customer360-api
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-c360_user}:${POSTGRES_PASSWORD:-c360_password}@postgres:5432/${POSTGRES_DB:-customer360}
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    container_name: customer360-frontend
+    ports:
+      - "3002:80"
+    depends_on:
+      - backend
+
+  airflow-scheduler:
+    build:
+      context: .
+      dockerfile: Dockerfile.airflow
+    container_name: customer360-airflow-scheduler
+    command: scheduler
+    environment:
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${POSTGRES_USER:-c360_user}:${POSTGRES_PASSWORD:-c360_password}@postgres:5432/airflow
+      AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
+      AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: 'false'
+      FERNET_KEY: ${FERNET_KEY:-change-me-in-env}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-c360_user}:${POSTGRES_PASSWORD:-c360_password}@postgres:5432/${POSTGRES_DB:-customer360}
+      PYTHONPATH: /opt/airflow/repo
+    volumes:
+      - ./dags:/opt/airflow/dags:ro
+      - .:/opt/airflow/repo:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  airflow-webserver:
+    build:
+      context: .
+      dockerfile: Dockerfile.airflow
+    container_name: customer360-airflow-webserver
+    command: webserver
+    environment:
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${POSTGRES_USER:-c360_user}:${POSTGRES_PASSWORD:-c360_password}@postgres:5432/airflow
+      AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
+      AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: 'false'
+      FERNET_KEY: ${FERNET_KEY:-change-me-in-env}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-c360_user}:${POSTGRES_PASSWORD:-c360_password}@postgres:5432/${POSTGRES_DB:-customer360}
+      PYTHONPATH: /opt/airflow/repo
+    volumes:
+      - ./dags:/opt/airflow/dags:ro
+      - .:/opt/airflow/repo:ro
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
